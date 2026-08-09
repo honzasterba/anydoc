@@ -3,10 +3,11 @@
 [![Crates.io](https://img.shields.io/crates/v/anydoc.svg)](https://crates.io/crates/anydoc)
 [![npm](https://img.shields.io/npm/v/@firecrawl/anydoc.svg)](https://www.npmjs.com/package/@firecrawl/anydoc)
 [![PyPI](https://img.shields.io/pypi/v/firecrawl-anydoc.svg)](https://pypi.org/project/firecrawl-anydoc/)
+[![Gem](https://img.shields.io/gem/v/anydoc-ruby.svg)](https://rubygems.org/gems/anydoc-ruby)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![skills.sh](https://skills.sh/b/firecrawl/anydoc)](https://skills.sh/firecrawl/anydoc)
 
-Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), and the [browser](wasm/README.md) (WebAssembly).
+Fast Rust library that converts documents (Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF) into clean GitHub-Flavored Markdown. Includes bindings for [Node.js](node/README.md), [Python](python/README.md), [Ruby](ruby/README.md), and the [browser](wasm/README.md) (WebAssembly).
 
 Built by [Firecrawl](https://firecrawl.dev) to turn any office document into LLM-ready Markdown in single-digit milliseconds, with one consistent output no matter which format goes in. It powers [Firecrawl Parse](https://firecrawl.dev/parse), so if you'd rather not run it yourself, the hosted API gives you the same conversion plus our OCR models for the scanned pages anydoc can't read on its own.
 
@@ -82,6 +83,30 @@ document = anydoc.to_document(data)
 
 > Full API reference: [python/README.md](python/README.md)
 
+### Ruby
+
+```bash
+bundle add anydoc-ruby
+```
+
+```ruby
+require "anydoc"
+
+# From a file path:
+markdown = Anydoc.to_markdown("report.docx")
+
+# From bytes, with the format detected from the content:
+markdown = Anydoc.to_markdown_bytes(data)
+
+# Or name it, which signature-less formats (CSV) need:
+markdown = Anydoc.to_markdown_bytes(data, format: :csv)
+
+# Or stop at the document model, which also carries embedded assets:
+document = Anydoc.to_document(data)
+```
+
+> Full API reference: [ruby/README.md](ruby/README.md)
+
 ### Browser (WebAssembly)
 
 ```bash
@@ -132,7 +157,7 @@ let document = anydoc::to_document(&bytes, None)?;
 - **Embedded assets.** Images and embedded objects render as their alt text in the Markdown, and the raw bytes stay available on the document model, tagged with their media type. Images with an external URL become ordinary Markdown images.
 - **Content-based format detection.** The format is read from the bytes themselves (PDF header, RTF open group, OLE stream names, ZIP package mimetype), so mislabeled files still convert correctly.
 - **Fast.** Pure Rust, no ML models, no external services. Median conversion time is under 5ms per document.
-- **Bindings that stay out of the way.** Node.js conversion runs on the libuv thread pool and never blocks the event loop; Python releases the GIL so other threads keep running. TypeScript types and Python stubs ship with the packages.
+- **Bindings that stay out of the way.** Node.js conversion runs on the libuv thread pool and never blocks the event loop; Python releases the GIL and Ruby releases the GVL, so other threads keep running. TypeScript types, Python stubs, and RBS signatures ship with the packages.
 - **PDF support built in.** Text-based PDFs convert locally through [pdf-inspector](https://github.com/firecrawl/pdf-inspector), no OCR service required.
 - **Agent ready.** Ships as an [Agent Skill](#agent-skill): one `npx skills add firecrawl/anydoc` and any agent can read office documents.
 
@@ -197,7 +222,7 @@ Format::from_extension("pptm"); // Some(Format::Pptx)
 Format::from_path(Path::new("report.odt")); // Some(Format::Odt)
 ```
 
-The same three functions exist in Node (`formatFromBytes`, ...) and Python (`anydoc.format_from_bytes`, ...).
+The same three functions exist in Node (`formatFromBytes`, ...), Python (`anydoc.format_from_bytes`, ...), and Ruby (`Anydoc.format_from_bytes`, ...).
 
 ## Errors
 
@@ -224,7 +249,7 @@ match anydoc::to_markdown(path) {
 | `MissingPart`   | A part required for any meaningful output is absent                 |
 | `Io`            | The file could not be read, from `to_markdown` only                 |
 
-Node and wasm publish the variant name on `error.code`; Python raises one `anydoc.ConvertError` subclass per variant, or `OSError` when the file cannot be read.
+Node and wasm publish the variant name on `error.code`; Python raises one `anydoc.ConvertError` subclass per variant, or `OSError` when the file cannot be read, and Ruby one `Anydoc::ConvertError` subclass per variant, or the matching `Errno`.
 
 ## How it works
 
@@ -252,16 +277,19 @@ Because every format funnels through the same document model and serializer, out
 cargo test
 cd node && npm install && npm run build && npm test
 cd python && pip install maturin && maturin develop && python -m unittest discover -s tests
+cd ruby && bundle install && bundle exec rake
 wasm-pack build wasm --release --target web --scope firecrawl && node --test wasm/test.mjs  # see wasm/README.md
 ```
 
 A committed fixture corpus under `tests/fixtures/` is snapshot-tested, `tests/robustness.rs` mutation-tests every fixture, and `fuzz/` carries cargo-fuzz targets per format. The speed and quality benchmark lives in [`bench/`](bench/README.md).
 
-Releases are tagged `v<version>`, which publishes the crate, the npm package, and the PyPI wheels from [`.github/workflows/release.yml`](.github/workflows/release.yml). The version lives in three places, bumped together for a release:
+Releases are tagged `v<version>`, which publishes the crate, the npm package, the PyPI wheels, and the gems from [`.github/workflows/release.yml`](.github/workflows/release.yml). The version lives in five places, bumped together for a release and checked by [`scripts/check-versions.sh`](scripts/check-versions.sh):
 
 - [`Cargo.toml`](Cargo.toml): the crate
 - [`node/package.json`](node/package.json): the npm package
 - [`python/Cargo.toml`](python/Cargo.toml): the wheel (`python/pyproject.toml` reads it)
+- [`wasm/Cargo.toml`](wasm/Cargo.toml): the wasm npm package
+- [`ruby/lib/anydoc/version.rb`](ruby/lib/anydoc/version.rb): the gem, whose `anydoc` dependency in [`ruby/ext/anydoc/Cargo.toml`](ruby/ext/anydoc/Cargo.toml) moves with it
 
 ## License
 

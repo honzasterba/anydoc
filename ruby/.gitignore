@@ -1,0 +1,17 @@
+# Built gems, the compiled extension, and everything rake-compiler builds it
+# through.
+/*.gem
+/lib/anydoc/*.so
+/lib/anydoc/*.bundle
+/lib/anydoc/*.dll
+/tmp/
+/pkg/
+/target/
+/.rb-sys/
+# Resolved by cargo at build time: inside this repository the anydoc crate is
+# patched to the local source, so a committed lock would not match a released
+# gem's resolution.
+/Cargo.lock
+/ext/anydoc/Cargo.lock
+Gemfile.lock
+/.bundle/

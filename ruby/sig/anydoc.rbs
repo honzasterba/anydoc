@@ -1,0 +1,163 @@
+# Type signatures for anydoc-ruby.
+
+module Anydoc
+  VERSION: String
+
+  # Every format anydoc reads, named after the extension that identifies it.
+  FORMATS: Array[Symbol]
+
+  type format = Symbol | String
+  type path = String | ::Pathname | _ToPath
+
+  def self.to_markdown: (path path) -> String
+  def self.to_markdown_bytes: (String data, ?format: format?) -> String
+  def self.to_document: (String data, ?format: format?) -> Document
+  def self.format_from_bytes: (String data) -> Symbol?
+  def self.format_from_extension: (String | Symbol extension) -> Symbol?
+  def self.format_from_path: (path path) -> Symbol?
+
+  # Argument coercion and file reading happen in Ruby; these are the raw
+  # entry points the extension defines.
+  #
+  # @api private
+  module Native
+    def self.to_markdown_bytes: (String data, Symbol? format) -> String
+    def self.to_document: (String data, Symbol? format) -> Document
+    def self.format_from_bytes: (String data) -> Symbol?
+    def self.format_from_extension: (String extension) -> Symbol?
+  end
+
+  class Error < StandardError
+  end
+
+  class ConvertError < Error
+  end
+
+  class UnsupportedError < ConvertError
+  end
+
+  class MalformedError < ConvertError
+    attr_reader part: String?
+  end
+
+  class EncryptedError < ConvertError
+  end
+
+  class ResourceLimitError < ConvertError
+    attr_reader limit: Symbol
+  end
+
+  class MissingPartError < ConvertError
+    attr_reader part: String
+  end
+
+  class Document < ::Data
+    attr_reader blocks: Array[Block]
+    attr_reader notes: Array[Note]
+    attr_reader assets: Array[Asset]
+
+    def self.new: (Array[Block] blocks, Array[Note] notes, Array[Asset] assets) -> Document
+                | (blocks: Array[Block], notes: Array[Note], assets: Array[Asset]) -> Document
+  end
+
+  class Block < ::Data
+    # :heading | :paragraph | :list | :table | :block_quote | :code_block | :rule
+    attr_reader kind: Symbol
+    attr_reader level: Integer?
+    attr_reader anchor: String?
+    attr_reader content: Array[Inline]?
+    attr_reader list: List?
+    attr_reader table: Table?
+    attr_reader blocks: Array[Block]?
+    attr_reader lang: String?
+    attr_reader text: String?
+  end
+
+  class Inline < ::Data
+    # :text | :link | :image | :anchor | :note_ref | :line_break
+    attr_reader kind: Symbol
+    attr_reader text: String?
+    attr_reader style: Style?
+    attr_reader content: Array[Inline]?
+    attr_reader target: LinkTarget?
+    attr_reader alt: String?
+    attr_reader source: ImageSource?
+    attr_reader anchor: String?
+    attr_reader note_id: String?
+  end
+
+  class Style < ::Data
+    attr_reader bold: bool
+    attr_reader italic: bool
+    attr_reader strike: bool
+    attr_reader code: bool
+
+    def self.new: (bool bold, bool italic, bool strike, bool code) -> Style
+                | (bold: bool, italic: bool, strike: bool, code: bool) -> Style
+
+    def plain?: () -> bool
+  end
+
+  class LinkTarget < ::Data
+    # :external | :relative | :anchor
+    attr_reader kind: Symbol
+    attr_reader value: String
+  end
+
+  class ImageSource < ::Data
+    # :external | :asset | :unavailable
+    attr_reader kind: Symbol
+    attr_reader url: String?
+    attr_reader asset_id: Integer?
+  end
+
+  class List < ::Data
+    # :bullet | :decimal | :lower_alpha | :upper_alpha | :lower_roman | :upper_roman
+    attr_reader marker: Symbol
+    attr_reader start: Integer
+    attr_reader items: Array[ListItem]
+
+    def ordered?: () -> bool
+  end
+
+  class ListItem < ::Data
+    attr_reader blocks: Array[Block]
+    attr_reader checked: bool?
+    attr_reader marker_label: String?
+  end
+
+  class Table < ::Data
+    attr_reader grid: Array[Array[CellSlot]]
+    attr_reader header_rows: Integer
+    # :data | :layout
+    attr_reader kind: Symbol
+  end
+
+  class CellSlot < ::Data
+    # :origin | :covered
+    attr_reader kind: Symbol
+    attr_reader cell: Cell?
+    attr_reader origin_row: Integer?
+    attr_reader origin_col: Integer?
+  end
+
+  class Cell < ::Data
+    attr_reader blocks: Array[Block]
+    attr_reader col_span: Integer
+    attr_reader row_span: Integer
+  end
+
+  class Note < ::Data
+    attr_reader id: String
+    # :footnote | :endnote
+    attr_reader kind: Symbol
+    attr_reader blocks: Array[Block]
+  end
+
+  class Asset < ::Data
+    attr_reader id: Integer
+    attr_reader media_type: String
+    attr_reader origin_part: String
+    attr_reader data: String
+  end
+end

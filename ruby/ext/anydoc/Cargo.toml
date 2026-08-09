@@ -1,0 +1,22 @@
+[package]
+name = "anydoc"
+version = "0.1.0"
+edition = "2024"
+description = "Ruby bindings for anydoc"
+license = "MIT"
+repository = "https://github.com/honzasterba/anydoc"
+publish = false
+
+[lib]
+# Names the artifact the extension loads (anydoc.so / anydoc.bundle) and the
+# Init_anydoc entry point rb_sys wires up.
+crate-type = ["cdylib"]
+
+[dependencies]
+# From crates.io, so an installed source gem builds anywhere. Builds inside
+# this repository redirect it to the local crate through ruby/.cargo/config.toml,
+# and scripts/check-versions.sh keeps this requirement on the release version.
+anydoc = "0.1.7"
+magnus = "0.8"
+# For rb_thread_call_without_gvl; magnus resolves to the same major version.
+rb-sys = "0.9"

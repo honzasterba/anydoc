@@ -292,6 +292,179 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && steps.probe.outputs.published == 'false'
         run: cargo publish -p anydoc --locked --dry-run
 
+  # The gems build against the crate published above rather than the working
+  # tree: the cross-compile container mounts ruby/ alone, so the crate has to
+  # come from crates.io. That also means gems are built for a real release
+  # only - a manual dry run has no published crate of that version to build
+  # against, so the dry-run job below builds against the working tree instead.
+  build-gems:
+    name: Build gem (${{ matrix.platform }})
+    needs: [gate, publish-crates]
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - aarch64-linux
+          - aarch64-linux-musl
+          - arm64-darwin
+          - x64-mingw-ucrt
+          - x86_64-darwin
+          - x86_64-linux
+          - x86_64-linux-musl
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+          working-directory: ruby
+      - name: Build against the published crate
+        run: rm -f ruby/.cargo/config.toml
+      # One gem per platform, carrying an extension for each Ruby ABI.
+      - run: >
+          bundle exec rb-sys-dock --platform ${{ matrix.platform }}
+          --ruby-versions '3.2,3.3,3.4,4.0' --build
+        working-directory: ruby
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gems-${{ matrix.platform }}
+          path: ruby/pkg/*-${{ matrix.platform }}.gem
+          if-no-files-found: error
+
+  # The fallback for platforms and Ruby versions no precompiled gem covers:
+  # `gem install` compiles it, which needs a Rust toolchain.
+  build-gem-source:
+    name: Build gem (source)
+    needs: [gate, publish-crates]
+    if: github.event_name == 'push'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          working-directory: ruby
+      - run: rm -f ruby/.cargo/config.toml
+      - run: gem build anydoc-ruby.gemspec
+        working-directory: ruby
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gems-source
+          path: ruby/anydoc-ruby-*.gem
+          if-no-files-found: error
+
+  test-gems:
+    name: Test gem (${{ matrix.platform }})
+    needs: build-gems
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: arm64-darwin
+            host: blacksmith-6vcpu-macos-latest
+          - platform: x64-mingw-ucrt
+            host: blacksmith-4vcpu-windows-2025
+          # The Linux flavors test through `docker run` rather than container:
+          # jobs — JavaScript actions cannot run inside Alpine containers on
+          # arm64 runners.
+          - platform: x86_64-linux
+            host: blacksmith-4vcpu-ubuntu-2404
+            image: ruby:3.4-slim
+          - platform: aarch64-linux
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            image: ruby:3.4-slim
+          - platform: x86_64-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404
+            image: ruby:3.4-alpine
+          - platform: aarch64-linux-musl
+            host: blacksmith-4vcpu-ubuntu-2404-arm
+            image: ruby:3.4-alpine
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        if: ${{ !matrix.image }}
+        with:
+          ruby-version: '3.4'
+      - uses: actions/download-artifact@v8
+        with:
+          name: gems-${{ matrix.platform }}
+          path: gems
+      # The tests run against the installed gem, so ruby/lib stays off the
+      # load path: the source tree there has no compiled extension in it.
+      - name: Install the gem and run its tests
+        if: ${{ !matrix.image }}
+        shell: bash
+        run: |
+          gem install --local gems/*.gem
+          ruby -Itest test/anydoc_test.rb && ruby -Itest test/document_test.rb
+        working-directory: ruby
+      - name: Install the gem and run its tests in a container
+        if: ${{ matrix.image }}
+        run: >
+          docker run --rm -v ${{ github.workspace }}:/build -w /build/ruby
+          ${{ matrix.image }} sh -c
+          "gem install --local /build/gems/*.gem &&
+          ruby -Itest test/anydoc_test.rb && ruby -Itest test/document_test.rb"
+
+  publish-rubygems:
+    name: Publish RubyGems
+    needs: [gate, test-gems, build-gem-source]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # RubyGems trusted publishing
+    steps:
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: gems-*
+          path: gems
+          merge-multiple: true
+      # Trusted publishing, registered on RubyGems.org for anydoc-ruby
+      # against this repository and workflow file; it also satisfies the
+      # rubygems_mfa_required the gemspec declares.
+      - uses: rubygems/configure-rubygems-credentials@v2
+      - name: Push every gem this release built
+        run: |
+          version='${{ needs.gate.outputs.version }}'
+          published=$(curl -fsSL https://rubygems.org/api/v1/versions/anydoc-ruby.json || echo '[]')
+          for gem in gems/*.gem; do
+            platform=$(ruby -rrubygems/package -e 'puts Gem::Package.new(ARGV[0]).spec.platform.to_s' "$gem")
+            if printf '%s' "$published" | ruby -rjson -e \
+              'exit(JSON.parse($stdin.read).any? { |v| v["number"] == ARGV[0] && v["platform"] == ARGV[1] })' \
+              "$version" "$platform"; then
+              echo "anydoc-ruby $version ($platform) is already published; skipping."
+              continue
+            fi
+            gem push "$gem"
+          done
+
+  # A manual run cannot build the released gems, so it builds and tests the
+  # same packaging against the working tree instead.
+  dry-run-gem:
+    name: Build gem (dry run)
+    needs: gate
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+          working-directory: ruby
+      - run: bundle exec rake
+        working-directory: ruby
+      - run: gem build anydoc-ruby.gemspec
+        working-directory: ruby
+
   build-sdist:
     name: Build sdist
     needs: gate
@@ -443,10 +616,10 @@ jobs:
           skip-existing: true
 
   # The release page appears last: only once every registry publish has
-  # succeeded, carrying the Node addons, the wheels, and the sdist.
+  # succeeded, carrying the Node addons, the wheels, the sdist, and the gems.
   github-release:
     name: GitHub release
-    needs: [publish-npm, publish-npm-wasm, publish-crates, publish-pypi]
+    needs: [publish-npm, publish-npm-wasm, publish-crates, publish-pypi, publish-rubygems]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -461,6 +634,11 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
+          path: assets
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: gems-*
           path: assets
           merge-multiple: true
       - name: Create release and upload assets

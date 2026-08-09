@@ -1,0 +1,12 @@
+# Workspace root for the extension crate. It ships with the source gem, so an
+# installed gem builds against this root instead of walking up into whatever
+# directory RubyGems unpacked it into.
+[workspace]
+members = ["ext/anydoc"]
+resolver = "3"
+
+# Profiles belong to the workspace root, so the extension's release build is
+# configured here.
+[profile.release]
+lto = "thin"
+strip = "symbols"

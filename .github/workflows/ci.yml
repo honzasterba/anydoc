@@ -80,6 +80,35 @@ jobs:
       - run: wasm-pack build wasm --release --target web --scope firecrawl
       - run: node --test wasm/test.mjs
 
+  ruby:
+    name: Ruby bindings
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ruby
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+          working-directory: ruby
+      # ruby/ is its own cargo workspace, so the Rust job's fmt and clippy
+      # runs do not reach it.
+      - run: cargo fmt --all --check
+        working-directory: ruby
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: ruby
+      # Compiles the extension, then runs the tests against it.
+      - run: bundle exec rake
+        working-directory: ruby
+      # The gem RubyGems would receive, built from the same tree.
+      - run: gem build anydoc-ruby.gemspec
+        working-directory: ruby
+
   python:
     name: Python bindings
     runs-on: blacksmith-8vcpu-ubuntu-2404

@@ -1,0 +1,9 @@
+# Inside this repository the extension builds against the local crate rather
+# than the last release on crates.io: a release bumps the gem and the crate in
+# the same commit, before that version of the crate exists on crates.io.
+#
+# This file is not part of the gem. Released gems - and anyone compiling an
+# installed source gem - resolve `anydoc` from crates.io as usual, which is why
+# the release workflow removes this file before it cross-compiles.
+[patch.crates-io]
+anydoc = { path = ".." }

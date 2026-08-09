@@ -1,0 +1,61 @@
+# frozen_string_literal: true
+
+require "bundler/gem_tasks"
+require "rake/testtask"
+require "rb_sys/extensiontask"
+
+GEMSPEC = Gem::Specification.load("anydoc-ruby.gemspec")
+
+# Cross-compiling is driven by RUBY_TARGET, which rb-sys-dock sets inside the
+# container it builds each precompiled gem in; the release workflow holds the
+# list of platforms those are built for.
+RbSys::ExtensionTask.new("anydoc", GEMSPEC) do |ext|
+  ext.lib_dir = "lib/anydoc"
+end
+
+Rake::TestTask.new(:test) do |t|
+  t.libs << "test"
+  t.warning = true
+  t.test_files = FileList["test/**/*_test.rb"]
+end
+
+task test: :compile
+
+task default: %i[compile test]
+
+# The platforms precompiled gems are published for, named as rb-sys-dock names
+# them: the same set the Node addon and the Python wheels are built for.
+CROSS_PLATFORMS = %w[
+  aarch64-linux
+  aarch64-linux-musl
+  arm64-darwin
+  x64-mingw-ucrt
+  x86_64-darwin
+  x86_64-linux
+  x86_64-linux-musl
+].freeze
+
+# The Ruby ABIs each precompiled gem carries an extension for.
+CROSS_RUBIES = "3.2,3.3,3.4,4.0"
+
+namespace :gems do
+  CROSS_PLATFORMS.each do |platform|
+    desc "Build the precompiled gem for #{platform} (needs Docker)"
+    task platform do
+      # Run from the repository root: rb-sys-dock mounts the shell's working
+      # directory, and .cargo/config.toml points the anydoc dependency at the
+      # crate one level above this one, which therefore has to be mounted too.
+      # `--directory` keeps the build itself running in here.
+      Dir.chdir(File.expand_path("..", __dir__)) do
+        sh "bundle", "exec", "rb-sys-dock",
+           "--directory", __dir__,
+           "--platform", platform,
+           "--ruby-versions", CROSS_RUBIES,
+           "--build"
+      end
+    end
+  end
+
+  desc "Build the source gem and every precompiled gem into pkg/ (needs Docker)"
+  task all: [:build] + CROSS_PLATFORMS
+end
