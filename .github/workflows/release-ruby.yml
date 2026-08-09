@@ -1,0 +1,210 @@
+# RubyGems trusted publishing is registered against this exact filename
+# (release-ruby.yml); renaming the file breaks the publisher.
+#
+# The gem releases on its own tags (ruby-v<version>) rather than with the crate
+# and the other bindings: it is the only artifact this repository publishes, and
+# its extension builds against the crate in the working tree, so it never waits
+# on crates.io.
+name: Release Ruby
+
+on:
+  push:
+    tags: ['ruby-v*']
+  # Manual dispatch is a dry run: everything builds and tests, nothing is
+  # published.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-ruby-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Version gate
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: The version locations agree (and the tag matches the gem)
+        id: check
+        run: |
+          version=$(sh scripts/check-versions.sh)
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "ruby-v$version" ]; then
+            echo "::error::tag '$GITHUB_REF_NAME' does not match the declared version '$version' (expected 'ruby-v$version')."
+            exit 1
+          fi
+          echo "Releasing anydoc-ruby $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build-gems:
+    name: Build gem (${{ matrix.platform }})
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - aarch64-linux
+          - aarch64-linux-musl
+          - arm64-darwin
+          - x64-mingw-ucrt
+          - x86_64-darwin
+          - x86_64-linux
+          - x86_64-linux-musl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          bundler-cache: true
+          working-directory: ruby
+      # Cross-compiles in an rb-sys-dock container: one gem per platform,
+      # carrying an extension for each Ruby ABI. The rake task runs the CLI
+      # from the repository root so the crate the extension builds against is
+      # mounted too.
+      - run: bundle exec rake gems:${{ matrix.platform }}
+        working-directory: ruby
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gems-${{ matrix.platform }}
+          path: ruby/pkg/*-${{ matrix.platform }}.gem
+          if-no-files-found: error
+
+  # The fallback for platforms and Ruby versions no precompiled gem covers:
+  # `gem install` compiles it, which needs a Rust toolchain.
+  build-gem-source:
+    name: Build gem (source)
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+          working-directory: ruby
+      - run: gem build anydoc-ruby.gemspec
+        working-directory: ruby
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gems-source
+          path: ruby/anydoc-ruby-*.gem
+          if-no-files-found: error
+
+  test-gems:
+    name: Test gem (${{ matrix.platform }})
+    needs: build-gems
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: arm64-darwin
+            host: macos-latest
+          - platform: x64-mingw-ucrt
+            host: windows-latest
+          - platform: x86_64-linux
+            host: ubuntu-latest
+            image: ruby:3.4-slim
+          - platform: x86_64-linux-musl
+            host: ubuntu-latest
+            image: ruby:3.4-alpine
+          - platform: aarch64-linux
+            host: ubuntu-24.04-arm
+            image: ruby:3.4-slim
+          - platform: aarch64-linux-musl
+            host: ubuntu-24.04-arm
+            image: ruby:3.4-alpine
+    # x86_64-darwin has no runner here: GitHub's macOS fleet is arm64, which
+    # cannot load an x86_64 extension. It ships built but untested.
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        if: ${{ !matrix.image }}
+        with:
+          ruby-version: '3.4'
+      - uses: actions/download-artifact@v8
+        with:
+          name: gems-${{ matrix.platform }}
+          path: gems
+      # The tests run against the installed gem, so ruby/lib stays off the load
+      # path: the source tree there holds no compiled extension.
+      - name: Install the gem and run its tests
+        if: ${{ !matrix.image }}
+        shell: bash
+        run: |
+          gem install --local ../gems/*.gem
+          ruby -Itest test/anydoc_test.rb
+          ruby -Itest test/document_test.rb
+        working-directory: ruby
+      - name: Install the gem and run its tests in a container
+        if: ${{ matrix.image }}
+        run: >
+          docker run --rm -v ${{ github.workspace }}:/build -w /build/ruby
+          ${{ matrix.image }} sh -c
+          "gem install --local /build/gems/*.gem &&
+          ruby -Itest test/anydoc_test.rb &&
+          ruby -Itest test/document_test.rb"
+
+  publish:
+    name: Publish RubyGems
+    needs: [gate, test-gems, build-gem-source]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # RubyGems trusted publishing
+    steps:
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: gems-*
+          path: gems
+          merge-multiple: true
+      # Mints a short-lived token from this workflow's OIDC identity, so no API
+      # key is stored and the account's MFA level does not gate the push.
+      - uses: rubygems/configure-rubygems-credentials@v2
+      - name: Push every gem this release built
+        run: |
+          version='${{ needs.gate.outputs.version }}'
+          published=$(curl -fsSL https://rubygems.org/api/v1/versions/anydoc-ruby.json || echo '[]')
+          for gem in gems/*.gem; do
+            platform=$(ruby -rrubygems/package -e 'puts Gem::Package.new(ARGV[0]).spec.platform.to_s' "$gem")
+            if printf '%s' "$published" | ruby -rjson -e \
+              'exit(JSON.parse($stdin.read).any? { |v| v["number"] == ARGV[0] && v["platform"] == ARGV[1] })' \
+              "$version" "$platform"; then
+              echo "anydoc-ruby $version ($platform) is already published; skipping."
+              continue
+            fi
+            gem push "$gem"
+          done
+
+  # The release page appears last, carrying every gem the release published.
+  github-release:
+    name: GitHub release
+    needs: publish
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: gems-*
+          path: assets
+          merge-multiple: true
+      - name: Create release and upload gems
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # --clobber keeps a re-run green when some assets already uploaded.
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" assets/* --clobber
