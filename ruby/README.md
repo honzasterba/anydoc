@@ -144,6 +144,18 @@ bundle exec rake gems:all            # the source gem and all seven platforms
 
 Run these through Rake rather than calling `rb-sys-dock` from this directory: the container mounts the shell's working directory, and the build needs the crate one level above it, so the tasks run the CLI from the repository root with `--directory ruby`. The first build of each platform pulls a multi-gigabyte image.
 
+### Releasing
+
+The gem version tracks the version of the crate it wraps, so a release starts from a crate version bump:
+
+1. Bump `lib/anydoc/version.rb` and the `anydoc` dependency in `ext/anydoc/Cargo.toml` to the crate's version.
+2. `sh scripts/check-versions.sh` from the repository root, which fails unless all seven version locations agree.
+3. Tag `ruby-v<version>` and push it.
+
+The tag runs [`.github/workflows/release-ruby.yml`](../.github/workflows/release-ruby.yml), which cross-compiles every platform gem, installs and tests each one, pushes them through RubyGems trusted publishing, and attaches them to a GitHub release. A `workflow_dispatch` run does everything except publish.
+
+Because the versions are locked together, a fix that touches only the bindings waits for the next crate release. Shipping one sooner means relaxing the version gate for that release.
+
 ## License
 
 [MIT](https://github.com/honzasterba/anydoc/blob/main/LICENSE)
