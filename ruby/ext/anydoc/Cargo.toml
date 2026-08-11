@@ -16,7 +16,7 @@ crate-type = ["cdylib"]
 # From crates.io, so an installed source gem builds anywhere. Builds inside
 # this repository redirect it to the local crate through ruby/.cargo/config.toml,
 # and scripts/check-versions.sh keeps this requirement on the release version.
-anydoc = "0.1.7"
+anydoc = "0.1.8"
 magnus = "0.8"
 # For rb_thread_call_without_gvl; magnus resolves to the same major version.
 rb-sys = "0.9"
