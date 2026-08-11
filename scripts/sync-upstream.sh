@@ -13,6 +13,10 @@
 #   sh scripts/sync-upstream.sh --no-tag     # sync and push, release later
 #   sh scripts/sync-upstream.sh --skip-tests # skip the local test run
 #
+# The local test run compiles the extension, so it needs a Rust toolchain
+# (https://rustup.rs). On a machine without one, pass --skip-tests: the tag
+# builds and tests every gem in CI before it publishes anything.
+#
 # The tag is what publishes: it runs .github/workflows/release-ruby.yml, which
 # cross-compiles every platform gem, tests each one, and pushes them to
 # RubyGems through trusted publishing.
@@ -30,7 +34,8 @@ for arg in "$@"; do
     --dry-run) dry_run=1 ;;
     --no-tag) tag=0 ;;
     --skip-tests) tests=0 ;;
-    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # Print the header comment, whatever length it has grown to.
+    -h|--help) awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
     *) echo "error: unknown option $arg" >&2; exit 1 ;;
   esac
 done
@@ -40,6 +45,17 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 run() { if [ "$dry_run" -eq 1 ]; then printf '   would run: %s\n' "$*"; else "$@"; fi; }
 
 [ -f Cargo.toml ] && [ -d ruby ] || die "run this from the repository root."
+
+# The test run compiles the extension, so it needs cargo. Check that here,
+# before the merge: a toolchain this script cannot find is a reason to stop,
+# not a reason to leave a half-finished sync behind.
+if [ "$tests" -eq 1 ] && ! command -v cargo > /dev/null 2>&1; then
+  printf 'error: the local test run needs a Rust toolchain, and cargo is not on PATH.\n' >&2
+  printf '  install one from https://rustup.rs, or re-run with --skip-tests.\n' >&2
+  printf '  --skip-tests is safe for a release: release-ruby.yml builds every\n' >&2
+  printf '  platform gem and runs its tests before it publishes anything.\n' >&2
+  exit 1
+fi
 
 # Read `version = "..."` from a manifest's [package] section.
 crate_version() {
