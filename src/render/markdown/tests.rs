@@ -30,6 +30,29 @@ fn heading_and_paragraph() {
 }
 
 #[test]
+fn math_renders_in_dollar_delimiters_and_text_dollars_are_escaped() {
+    let md = doc(vec![
+        Block::Paragraph(vec![
+            Inline::plain("Costs $5 or $6, and "),
+            Inline::Math("x_1 < y".into()),
+            Inline::plain(" holds."),
+        ]),
+        Block::Math("\\sum_{i=1}^{n} i $".into()),
+    ]);
+    assert_eq!(md, "Costs \\$5 or \\$6, and $x_1 < y$ holds.\n\n$$\n\\sum_{i=1}^{n} i \\$\n$$\n");
+}
+
+#[test]
+fn math_in_a_table_cell_escapes_pipes() {
+    let cell = |inlines| Cell { blocks: vec![Block::Paragraph(inlines)], col_span: 1, row_span: 1 };
+    let md = doc(vec![table_from(
+        vec![vec![cell(vec![Inline::plain("abs")]), cell(vec![Inline::Math("|x|".into())])]],
+        0,
+    )]);
+    assert!(md.contains("| $\\|x\\|$ |"), "{md}");
+}
+
+#[test]
 fn escapes_paired_syntax_chars() {
     let md = doc(vec![Block::Paragraph(vec![Inline::plain("a *bold* _it_ ~st~ `code`")])]);
     assert_eq!(md, "a \\*bold* \\_it_ \\~st~ \\`code`\n");
@@ -43,6 +66,35 @@ fn lone_syntax_chars_left_alone() {
     assert_eq!(md, "2 * 3 = 6 and 5*6 #tag\n");
     let md = doc(vec![Block::Paragraph(vec![Inline::plain("x < 5, ~10%, file_name, a[1")])]);
     assert_eq!(md, "x < 5, ~10%, file_name, a[1\n");
+}
+
+#[test]
+fn partners_that_cannot_close_leave_delimiters_raw() {
+    // The space-padded `*` is not right-flanking, so the opener is inert.
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("a *b 2 * 3")])]);
+    assert_eq!(md, "a *b 2 * 3\n");
+    // Same across a run seam.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a *"),
+        Inline::LineBreak,
+        Inline::plain("2 * 3"),
+    ])]);
+    assert_eq!(md, "a *\\\n2 * 3\n");
+    // Intraword underscores can neither open nor close.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a _"),
+        Inline::LineBreak,
+        Inline::plain("snake_case"),
+    ])]);
+    assert_eq!(md, "a _\\\nsnake_case\n");
+    // A `*` after punctuation and before a word character is not
+    // right-flanking either.
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("a *b .*c")])]);
+    assert_eq!(md, "a *b .*c\n");
+    // Flanking is judged at the delimiter run's edges: `__` between
+    // letters is intraword even though each `_` neighbours the other.
+    let md = doc(vec![Block::Paragraph(vec![Inline::plain("a _x foo__bar")])]);
+    assert_eq!(md, "a _x foo__bar\n");
 }
 
 #[test]
@@ -91,6 +143,78 @@ fn negative_number_in_cell_unescaped() {
 fn trailing_delimiter_before_styled_run_escaped() {
     let md = doc(vec![Block::Paragraph(vec![Inline::plain("star*"), styled("x", BOLD)])]);
     assert_eq!(md, "star\\***x**\n");
+}
+
+#[test]
+fn delimiters_do_not_pair_across_run_seams() {
+    // Two lines each ending in a backtick must not form a code span (#45).
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        Inline::plain("b `"),
+    ])]);
+    assert_eq!(md, "a \\`\\\nb `\n");
+    // Emphasis pairs across a hard break just as code spans do.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a *"),
+        Inline::LineBreak,
+        Inline::plain("b*"),
+    ])]);
+    assert_eq!(md, "a \\*\\\nb*\n");
+    // A raw backtick pairs with a later code span's fence.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        styled("x", Style { code: true, ..Style::PLAIN }),
+    ])]);
+    assert_eq!(md, "a \\`\\\n`x`\n");
+}
+
+#[test]
+fn unresolved_link_fallback_counts_toward_seam_pairing() {
+    // The fallback text supplies the `]` that pairs with the earlier `[`.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("[click"),
+        Inline::LineBreak,
+        Inline::Link {
+            content: vec![Inline::plain("here]")],
+            target: LinkTarget::Anchor("nowhere".into()),
+        },
+        Inline::plain("(https://e.test)"),
+    ])]);
+    assert_eq!(md, "\\[click\\\nhere](https://e.test)\n");
+    // Same seam with an emphasis delimiter in the fallback.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a *"),
+        Inline::LineBreak,
+        Inline::Link {
+            content: vec![Inline::plain("b*")],
+            target: LinkTarget::Anchor("nowhere".into()),
+        },
+    ])]);
+    assert_eq!(md, "a \\*\\\nb*\n");
+}
+
+#[test]
+fn escaped_backtick_in_later_run_still_pairs() {
+    // A styled run's backtick is emitted as `\\``, yet still closes a span
+    // an earlier raw backtick opens: code spans ignore backslash escapes.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        styled("x`y", BOLD),
+    ])]);
+    assert_eq!(md, "a \\`\\\n**x\\`y**\n");
+    // A whitespace-only code run loses its styling and emits no fence.
+    let md = doc(vec![Block::Paragraph(vec![
+        Inline::plain("a `"),
+        Inline::LineBreak,
+        Inline::Link {
+            content: vec![styled("  ", Style { code: true, ..Style::PLAIN }), Inline::plain("x")],
+            target: LinkTarget::External("https://e.test".into()),
+        },
+    ])]);
+    assert_eq!(md, "a `\\\n[  x](https://e.test)\n");
 }
 
 #[test]
@@ -293,6 +417,18 @@ fn url_pipes_cannot_split_table_cells() {
     }]);
     let md = doc(vec![table_from(vec![vec![cell]], 0)]);
     assert_eq!(md, "|  |\n| --- |\n| [https://e.test/a\\|b](https://e.test/a%7Cb) |\n");
+}
+
+#[test]
+fn code_span_pipes_cannot_split_table_cells() {
+    let code = |t: &str| {
+        Cell::from_inlines(vec![Inline::Text {
+            text: t.into(),
+            style: Style { code: true, ..Style::PLAIN },
+        }])
+    };
+    let md = doc(vec![table_from(vec![vec![code("a | b"), code(r"a \| b")]], 0)]);
+    assert_eq!(md, concat!("|  |  |\n", "| --- | --- |\n", r"| `a \| b` | `a \\\| b` |", "\n"));
 }
 
 #[test]
