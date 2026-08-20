@@ -2,5 +2,5 @@
 
 module Anydoc
   # The gem version, which is the version of the anydoc crate it wraps.
-  VERSION = "0.1.8"
+  VERSION = "0.2.1"
 end
