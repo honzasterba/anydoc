@@ -32,7 +32,7 @@ module Anydoc
   #
   # @!attribute [r] kind
   #   @return [Symbol] +:heading+, +:paragraph+, +:list+, +:table+,
-  #     +:block_quote+, +:code_block+, or +:rule+.
+  #     +:block_quote+, +:code_block+, +:rule+, or +:math+.
   # @!attribute [r] level
   #   @return [Integer, nil] heading: 1-6.
   # @!attribute [r] anchor
@@ -49,7 +49,8 @@ module Anydoc
   # @!attribute [r] lang
   #   @return [String, nil] code_block.
   # @!attribute [r] text
-  #   @return [String, nil] code_block.
+  #   @return [String, nil] code_block, math (LaTeX source without
+  #     delimiters).
   class Block < Data.define(
     :kind, :level, :anchor, :content, :list, :table, :blocks, :lang, :text
   )
@@ -59,10 +60,10 @@ module Anydoc
   #
   # @!attribute [r] kind
   #   @return [Symbol] +:text+, +:link+, +:image+, +:anchor+ (a zero-width
-  #     marker for an internal link target at this position), +:note_ref+, or
-  #     +:line_break+.
+  #     marker for an internal link target at this position), +:note_ref+,
+  #     +:line_break+, or +:math+.
   # @!attribute [r] text
-  #   @return [String, nil] text.
+  #   @return [String, nil] text; math (LaTeX source without delimiters).
   # @!attribute [r] style
   #   @return [Style, nil] text.
   # @!attribute [r] content

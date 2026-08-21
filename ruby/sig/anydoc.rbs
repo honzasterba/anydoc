@@ -61,7 +61,7 @@ module Anydoc
   end
 
   class Block < ::Data
-    # :heading | :paragraph | :list | :table | :block_quote | :code_block | :rule
+    # :heading | :paragraph | :list | :table | :block_quote | :code_block | :rule | :math
     attr_reader kind: Symbol
     attr_reader level: Integer?
     attr_reader anchor: String?
@@ -74,7 +74,7 @@ module Anydoc
   end
 
   class Inline < ::Data
-    # :text | :link | :image | :anchor | :note_ref | :line_break
+    # :text | :link | :image | :anchor | :note_ref | :line_break | :math
     attr_reader kind: Symbol
     attr_reader text: String?
     attr_reader style: Style?

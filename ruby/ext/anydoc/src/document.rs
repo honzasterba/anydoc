@@ -95,6 +95,7 @@ impl Build<'_> {
                 BlockFields { lang, text: Some(text), ..BlockFields::of("code_block") }
             }
             model::Block::Rule => BlockFields::of("rule"),
+            model::Block::Math(tex) => BlockFields { text: Some(tex), ..BlockFields::of("math") },
         };
         self.classes.block.funcall(
             "new",
@@ -136,6 +137,9 @@ impl Build<'_> {
                 InlineFields { note_id: Some(id), ..InlineFields::of("note_ref") }
             }
             model::Inline::LineBreak => InlineFields::of("line_break"),
+            model::Inline::Math(tex) => {
+                InlineFields { text: Some(tex), ..InlineFields::of("math") }
+            }
         };
         self.classes.inline.funcall(
             "new",
