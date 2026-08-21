@@ -140,6 +140,9 @@ impl Build<'_> {
             model::Inline::Math(tex) => {
                 InlineFields { text: Some(tex), ..InlineFields::of("math") }
             }
+            model::Inline::Checkbox(checked) => {
+                InlineFields { checked: Some(checked), ..InlineFields::of("checkbox") }
+            }
         };
         self.classes.inline.funcall(
             "new",
@@ -153,6 +156,7 @@ impl Build<'_> {
                 fields.source,
                 fields.anchor,
                 fields.note_id,
+                fields.checked,
             ),
         )
     }
@@ -194,7 +198,7 @@ impl Build<'_> {
 
     fn list_item(&self, item: model::ListItem) -> Result<Value, Error> {
         let blocks = self.array(item.blocks, Self::block)?;
-        self.classes.list_item.funcall("new", (blocks, item.checked, item.marker_label))
+        self.classes.list_item.funcall("new", (blocks, item.marker_label))
     }
 
     fn table(&self, table: model::Table) -> Result<Value, Error> {
@@ -295,6 +299,7 @@ struct InlineFields {
     source: Option<Value>,
     anchor: Option<String>,
     note_id: Option<String>,
+    checked: Option<bool>,
 }
 
 impl InlineFields {
@@ -309,6 +314,7 @@ impl InlineFields {
             source: None,
             anchor: None,
             note_id: None,
+            checked: None,
         }
     }
 }

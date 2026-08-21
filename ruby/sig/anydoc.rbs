@@ -74,7 +74,7 @@ module Anydoc
   end
 
   class Inline < ::Data
-    # :text | :link | :image | :anchor | :note_ref | :line_break | :math
+    # :text | :link | :image | :anchor | :note_ref | :line_break | :math | :checkbox
     attr_reader kind: Symbol
     attr_reader text: String?
     attr_reader style: Style?
@@ -84,6 +84,7 @@ module Anydoc
     attr_reader source: ImageSource?
     attr_reader anchor: String?
     attr_reader note_id: String?
+    attr_reader checked: bool?
   end
 
   class Style < ::Data
@@ -122,7 +123,6 @@ module Anydoc
 
   class ListItem < ::Data
     attr_reader blocks: Array[Block]
-    attr_reader checked: bool?
     attr_reader marker_label: String?
   end
 

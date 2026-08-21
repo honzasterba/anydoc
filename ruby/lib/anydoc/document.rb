@@ -61,7 +61,7 @@ module Anydoc
   # @!attribute [r] kind
   #   @return [Symbol] +:text+, +:link+, +:image+, +:anchor+ (a zero-width
   #     marker for an internal link target at this position), +:note_ref+,
-  #     +:line_break+, or +:math+.
+  #     +:line_break+, +:math+, or +:checkbox+.
   # @!attribute [r] text
   #   @return [String, nil] text; math (LaTeX source without delimiters).
   # @!attribute [r] style
@@ -79,8 +79,11 @@ module Anydoc
   # @!attribute [r] note_id
   #   @return [String, nil] note_ref: the id of the note in
   #     {Document#notes}.
+  # @!attribute [r] checked
+  #   @return [Boolean, nil] checkbox: its state.
   class Inline < Data.define(
-    :kind, :text, :style, :content, :target, :alt, :source, :anchor, :note_id
+    :kind, :text, :style, :content, :target, :alt, :source, :anchor, :note_id,
+    :checked
   )
   end
 
@@ -142,14 +145,11 @@ module Anydoc
   #
   # @!attribute [r] blocks
   #   @return [Array<Block>]
-  # @!attribute [r] checked
-  #   @return [Boolean, nil] task-list state, when the item carries a
-  #     checkbox.
   # @!attribute [r] marker_label
   #   @return [String, nil] literal marker text that overrides the list marker
   #     when the source number text cannot be reproduced from the marker and
   #     position alone (composite number text such as +1-a)+).
-  class ListItem < Data.define(:blocks, :checked, :marker_label)
+  class ListItem < Data.define(:blocks, :marker_label)
   end
 
   # A table as a canonical grid: every logical grid position appears exactly
