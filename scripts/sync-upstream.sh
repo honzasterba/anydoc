@@ -11,11 +11,12 @@
 #   sh scripts/sync-upstream.sh              # the whole chain
 #   sh scripts/sync-upstream.sh --dry-run    # report only, change nothing
 #   sh scripts/sync-upstream.sh --no-tag     # sync and push, release later
-#   sh scripts/sync-upstream.sh --skip-tests # skip the local test run
 #
-# The local test run compiles the extension, so it needs a Rust toolchain
-# (https://rustup.rs). On a machine without one, pass --skip-tests: the tag
-# builds and tests every gem in CI before it publishes anything.
+# The test run compiles the extension, so this script needs a Rust toolchain
+# (https://rustup.rs). It is not optional: the fork carries the only copy of
+# the Ruby bindings, so an upstream change to the document model breaks them
+# without upstream ever noticing. The compile is what catches that, and it has
+# to run before the tag, because the tag publishes.
 #
 # The tag is what publishes: it runs .github/workflows/release-ruby.yml, which
 # cross-compiles every platform gem, tests each one, and pushes them to
@@ -27,13 +28,11 @@ BRANCH=main
 
 dry_run=0
 tag=1
-tests=1
 
 for arg in "$@"; do
   case $arg in
     --dry-run) dry_run=1 ;;
     --no-tag) tag=0 ;;
-    --skip-tests) tests=0 ;;
     # Print the header comment, whatever length it has grown to.
     -h|--help) awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
     *) echo "error: unknown option $arg" >&2; exit 1 ;;
@@ -49,11 +48,9 @@ run() { if [ "$dry_run" -eq 1 ]; then printf '   would run: %s\n' "$*"; else "$@
 # The test run compiles the extension, so it needs cargo. Check that here,
 # before the merge: a toolchain this script cannot find is a reason to stop,
 # not a reason to leave a half-finished sync behind.
-if [ "$tests" -eq 1 ] && ! command -v cargo > /dev/null 2>&1; then
-  printf 'error: the local test run needs a Rust toolchain, and cargo is not on PATH.\n' >&2
-  printf '  install one from https://rustup.rs, or re-run with --skip-tests.\n' >&2
-  printf '  --skip-tests is safe for a release: release-ruby.yml builds every\n' >&2
-  printf '  platform gem and runs its tests before it publishes anything.\n' >&2
+if ! command -v cargo > /dev/null 2>&1; then
+  printf 'error: the test run needs a Rust toolchain, and cargo is not on PATH.\n' >&2
+  printf '  install one from https://rustup.rs, then run this script again.\n' >&2
   exit 1
 fi
 
@@ -134,15 +131,11 @@ fi
 say "checking the version locations agree"
 sh scripts/check-versions.sh > /dev/null || die "the version gate failed; see the output above."
 
-if [ "$tests" -eq 1 ]; then
-  say "compiling the extension and running the tests"
-  if [ "$dry_run" -eq 0 ]; then
-    (cd ruby && bundle exec rake) || die "the Ruby test suite failed; nothing was pushed."
-  else
-    printf '   would run: cd ruby && bundle exec rake\n'
-  fi
+say "compiling the extension and running the tests"
+if [ "$dry_run" -eq 0 ]; then
+  (cd ruby && bundle exec rake) || die "the Ruby test suite failed; nothing was pushed."
 else
-  say "skipping the tests"
+  printf '   would run: cd ruby && bundle exec rake\n'
 fi
 
 if [ -n "$(git log --oneline "origin/$BRANCH..HEAD")" ]; then
